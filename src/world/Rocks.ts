@@ -2,15 +2,21 @@ import { type BufferGeometry, Mesh, MeshStandardMaterial } from 'three';
 import { type CollisionWorld } from '../core/collision';
 import { type Rng, angleDiff } from '../core/math';
 import { LIGHTHOUSE, PLAYER_START } from './layout';
-import { createRockTemplate, mergeRocks, placeRock } from './rockGeometry';
+import { createRockTemplate, mergeRocks, placeRock, type RockFootprint } from './rockGeometry';
 import { cliffFactor, coastDistance, coastRadius, distanceToPath, heightAt, slopeAt } from './terrain';
 
 const SOUTH = Math.PI / 2 + 0.1; // the sandy cove the player starts in is kept clear
 
+export interface Rocks {
+  mesh: Mesh;
+  footprints: RockFootprint[];
+}
+
 /** Shoreline boulders, cliff formations, outcrops and offshore stacks, baked into one mesh. */
-export function createRocks(rng: Rng, collision: CollisionWorld): Mesh | null {
+export function createRocks(rng: Rng, collision: CollisionWorld): Rocks | null {
   const templates = Array.from({ length: 6 }, () => createRockTemplate(rng));
   const parts: BufferGeometry[] = [];
+  const footprints: RockFootprint[] = [];
 
   const addRock = (x: number, z: number, size: number, opts: { squash?: number; sink?: number; y?: number } = {}) => {
     const { squash = 1, sink = 0.25 } = opts;
@@ -19,7 +25,9 @@ export function createRocks(rng: Rng, collision: CollisionWorld): Mesh | null {
     const sz = size * (0.85 + rng() * 0.4);
     const sy = size * squash * (0.8 + rng() * 0.4);
     const ground = heightAt(x, z);
-    parts.push(placeRock(t, x, opts.y ?? ground - sy * sink, z, sx, sy, sz, rng() * Math.PI * 2));
+    const baseY = opts.y ?? ground - sy * sink;
+    parts.push(placeRock(t, x, baseY, z, sx, sy, sz, rng() * Math.PI * 2));
+    footprints.push({ x, z, radius: Math.max(sx, sz) * 0.8, top: baseY + sy * 0.55 });
     if (opts.y === undefined && size >= 1.1 && ground > 0.2) collision.addCircle(x, z, Math.max(sx, sz) * 0.8);
   };
 
@@ -83,5 +91,5 @@ export function createRocks(rng: Rng, collision: CollisionWorld): Mesh | null {
   const mesh = new Mesh(merged, new MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  return mesh;
+  return { mesh, footprints };
 }

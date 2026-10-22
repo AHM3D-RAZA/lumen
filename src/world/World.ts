@@ -38,14 +38,14 @@ export function createWorld(): World {
   group.add(createProps(collision));
 
   const rocks = createRocks(rng, collision);
-  if (rocks) group.add(rocks);
+  if (rocks) group.add(rocks.mesh);
 
   const vegetation = createVegetation(rng, collision);
   group.add(vegetation.group);
 
   group.add(createDistantIslands(rng));
 
-  const ocean = createOcean();
+  const ocean = createOcean(rocks?.footprints ?? []);
   group.add(ocean.mesh);
 
   return {

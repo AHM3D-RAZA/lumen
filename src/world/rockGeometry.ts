@@ -80,3 +80,13 @@ export function mergeRocks(parts: BufferGeometry[]): BufferGeometry | null {
   parts.forEach((p) => p.dispose());
   return merged;
 }
+
+/** Approximate footprint of a placed rock, used to bake rocks into the water's shore-depth map. */
+export interface RockFootprint {
+  x: number;
+  z: number;
+  /** Horizontal radius at the rock's widest. */
+  radius: number;
+  /** World-space height of the rock's top. */
+  top: number;
+}
