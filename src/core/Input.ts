@@ -4,6 +4,8 @@ export class Input {
   private readonly pressHandlers = new Map<string, Array<() => void>>();
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    // Tab is a game key (collection): don't let the browser move keyboard focus.
+    if (e.code === 'Tab') e.preventDefault();
     if (e.repeat) return;
     this.down.add(e.code);
     this.pressHandlers.get(e.code)?.forEach((fn) => fn());

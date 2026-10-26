@@ -16,12 +16,24 @@
         <div id="objective"><span class="objective-label">Objective</span><span id="objective-text">Explore the island.</span></div>
         <div id="crosshair" aria-hidden="true"></div>
         <div id="prompt" class="hidden"><kbd>E</kbd><span id="prompt-text"></span></div>
+        <div id="toast" class="hidden" role="status" aria-live="polite"></div>
+        <div id="hint"><kbd>Tab</kbd><span>Collection</span></div>
         <div id="panel" class="hidden" role="dialog" aria-labelledby="panel-title">
           <h2 id="panel-title"></h2>
           <div id="panel-body"></div>
           <p class="hint"><kbd>E</kbd> Close</p>
         </div>
       </div>
+
+      <section id="inventory" class="hidden" role="dialog" aria-labelledby="inventory-title">
+        <div class="inventory-card">
+          <h2 id="inventory-title">Collection</h2>
+          <p id="inventory-empty">Nothing collected yet. Driftwood, sea glass and shells wash up along the shore, and stranger things lie a little off the path.</p>
+          <ul id="inventory-list"></ul>
+          <p id="inventory-total" class="inventory-total"></p>
+          <p class="hint"><kbd>Tab</kbd> Close</p>
+        </div>
+      </section>
 
       <section id="title" class="screen" aria-labelledby="title-name">
         <div class="screen-inner">
@@ -34,6 +46,7 @@
             <li><kbd>Mouse</kbd><span>Look</span></li>
             <li><kbd>Shift</kbd><span>Sprint</span></li>
             <li><kbd>E</kbd><span>Interact</span></li>
+            <li><kbd>Tab</kbd><span>Collection</span></li>
             <li><kbd>Esc</kbd><span>Release mouse</span></li>
           </ul>
         </div>
@@ -48,6 +61,7 @@
             <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></li>
             <li><kbd>Shift</kbd><span>Sprint</span></li>
             <li><kbd>E</kbd><span>Interact</span></li>
+            <li><kbd>Tab</kbd><span>Collection</span></li>
             <li><kbd>Esc</kbd><span>Release mouse</span></li>
           </ul>
         </div>

@@ -1,16 +1,16 @@
 import { type PerspectiveCamera, Vector3 } from 'three';
-import { type CollisionWorld, type Point2 } from '../core/collision';
+import { type CollisionWorld } from '../core/collision';
+import { moveBody } from '../core/movement';
+import { type FloorMap } from '../world/Floors';
 import { clamp } from '../core/math';
 import { type Input } from '../core/Input';
 import { PLAYER } from '../world/layout';
-import { heightAt, isWalkableTerrain } from '../world/terrain';
+import { heightAt } from '../world/terrain';
 
 const LOOK_SENSITIVITY = 0.0022;
 const MAX_PITCH = 1.45;
 const BASE_FOV = 65;
 const SPRINT_FOV = 68.5;
-
-const scratch: Point2 = { x: 0, z: 0 };
 
 /**
  * First-person controller: pointer-lock mouse look, WASD + sprint, terrain following, and
@@ -48,6 +48,7 @@ export class PlayerController {
     private readonly element: HTMLElement,
     private readonly input: Input,
     private readonly collision: CollisionWorld,
+    private readonly floors: FloorMap,
   ) {
     camera.rotation.order = 'YXZ';
     document.addEventListener('mousemove', this.onMouseMove);
@@ -71,7 +72,7 @@ export class PlayerController {
   }
 
   setPose(x: number, z: number, yaw: number, pitch: number): void {
-    this.position.set(x, heightAt(x, z), z);
+    this.position.set(x, this.floors.groundAt(x, z, heightAt(x, z)), z);
     this.yaw = yaw;
     this.pitch = pitch;
     this.eyeY = this.position.y + PLAYER.eyeHeight;
@@ -127,19 +128,7 @@ export class PlayerController {
   }
 
   private move(dx: number, dz: number): void {
-    const { x, z } = this.position;
-    if (this.tryStand(x + dx, z + dz)) return;
-    // Slide along obstacles by trying each axis on its own.
-    if (!this.tryStand(x + dx, z)) this.tryStand(x, z + dz);
-  }
-
-  private tryStand(x: number, z: number): boolean {
-    scratch.x = x;
-    scratch.z = z;
-    this.collision.resolve(scratch, PLAYER.radius);
-    if (!isWalkableTerrain(scratch.x, scratch.z)) return false;
-    this.position.set(scratch.x, heightAt(scratch.x, scratch.z), scratch.z);
-    return true;
+    moveBody(this.position, dx, dz, this.collision, this.floors);
   }
 
   private applyToCamera(bobSide: number, bobUp: number): void {

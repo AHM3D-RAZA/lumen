@@ -19,7 +19,9 @@ try {
   const canvas = document.getElementById('game-canvas');
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('The game canvas is missing from the page.');
   const ui = new UI();
+  const t0 = performance.now();
   game = new Game(canvas, ui);
+  if (import.meta.env.DEV) console.info(`[lumen] world built in ${Math.round(performance.now() - t0)} ms`);
   game.start();
   if (import.meta.env.DEV) (window as unknown as { __lumen: ReturnType<Game['debug']> }).__lumen = game.debug();
 } catch (err) {

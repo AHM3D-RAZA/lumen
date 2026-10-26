@@ -4,6 +4,8 @@ import { createSky } from './Sky';
 
 export interface Lighting {
   sun: DirectionalLight;
+  /** 0 = outdoors, 1 = indoors: dims the sky fill and brightens exposure so interiors read as warm lamplight. */
+  setIndoor(amount: number): void;
   dispose(): void;
 }
 
@@ -26,7 +28,8 @@ export function createLighting(scene: Scene, renderer: WebGLRenderer): Lighting 
   sun.shadow.normalBias = 0.45;
   scene.add(sun, sun.target);
 
-  scene.add(new HemisphereLight('#8fb0cc', '#4a4a3c', 0.22));
+  const hemi = new HemisphereLight('#8fb0cc', '#4a4a3c', 0.22);
+  scene.add(hemi);
 
   // Bake the sky into a small environment map for ambient light and metal/glass reflections.
   const pmrem = new PMREMGenerator(renderer);
@@ -40,8 +43,14 @@ export function createLighting(scene: Scene, renderer: WebGLRenderer): Lighting 
   (envSky.mesh.material as { dispose(): void }).dispose();
   pmrem.dispose();
 
+  const outdoorExposure = renderer.toneMappingExposure;
   return {
     sun,
+    setIndoor(k) {
+      hemi.intensity = 0.22 - 0.16 * k;
+      scene.environmentIntensity = 0.3 - 0.2 * k;
+      renderer.toneMappingExposure = outdoorExposure + 0.2 * k;
+    },
     dispose() {
       envTarget.dispose();
       sun.shadow.map?.dispose();

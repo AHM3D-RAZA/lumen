@@ -212,6 +212,75 @@ button.primary:active { transform: translateY(1px); }
 #panel-body p { margin: 0 0 0.8rem; font: 400 1.02rem/1.55 var(--serif); }
 #panel .hint { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--ink-soft); text-align: right; }
 
+#toast {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: var(--night);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(240, 181, 106, 0.3);
+  font: 400 1rem var(--serif);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  animation: toast-in 0.25s ease both;
+}
+#toast.leaving { opacity: 0; transition: opacity 0.5s ease; }
+#panel:not(.hidden) ~ #toast { bottom: calc(9% + 230px); }
+
+#hint {
+  position: absolute;
+  right: 22px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  color: rgba(244, 234, 214, 0.55);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+#hint kbd { margin: 0; font-size: 0.68rem; }
+
+/* ---- Collection ------------------------------------------------------------------------------------- */
+
+#inventory {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 20, 26, 0.5);
+  backdrop-filter: blur(3px);
+  animation: fade-in 0.2s ease both;
+}
+.inventory-card {
+  width: min(420px, calc(100vw - 40px));
+  padding: 26px 30px 18px;
+  border: 1px solid rgba(240, 181, 106, 0.35);
+  border-radius: 12px;
+  background: rgba(10, 28, 34, 0.9);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.4);
+}
+.inventory-card h2 { color: var(--amber); margin-bottom: 1rem; }
+#inventory-empty { margin: 0 0 0.6rem; font: italic 400 1rem/1.55 var(--serif); color: var(--ink-soft); }
+#inventory-list { margin: 0; padding: 0; list-style: none; }
+#inventory-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 1rem;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(244, 234, 214, 0.12);
+}
+#inventory-list .item-name { font: 400 1.1rem var(--serif); }
+#inventory-list .item-count { font: 600 1.05rem var(--sans); color: var(--amber); font-variant-numeric: tabular-nums; }
+#inventory-list .item-blurb { grid-column: 1 / -1; font: italic 400 0.86rem var(--serif); color: var(--ink-soft); }
+.inventory-total { margin: 0.9rem 0 0; font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+.inventory-card .hint { margin: 0.9rem 0 0; font-size: 0.78rem; color: var(--ink-soft); text-align: right; }
+
 /* ---- Fatal error -------------------------------------------------------------------------- */
 
 #error {
@@ -228,6 +297,10 @@ button.primary:active { transform: translateY(1px); }
 }
 #error p { max-width: 520px; color: var(--ink-soft); line-height: 1.6; }
 
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise-in {
   from { opacity: 0; transform: translate(-50%, 10px); }

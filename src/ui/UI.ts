@@ -21,22 +21,72 @@ export class UI implements InteractionContext {
   private readonly errorMessage = el('error-message');
   private readonly startButton = el<HTMLButtonElement>('start-button');
   private readonly resumeButton = el<HTMLButtonElement>('resume-button');
+  private readonly inventory = el('inventory');
+  private readonly inventoryList = el('inventory-list');
+  private readonly inventoryEmpty = el('inventory-empty');
+  private readonly inventoryTotal = el('inventory-total');
+  private readonly toastBox = el('toast');
 
   private onStart: (() => void) | null = null;
   private onResume: (() => void) | null = null;
   private titleTimer = 0;
+  private toastTimer = 0;
+  private toastFade = 0;
+  private onInventoryClose: (() => void) | null = null;
 
   private readonly handleStart = (): void => this.onStart?.();
   private readonly handleResume = (): void => this.onResume?.();
+  private readonly handleInventoryClick = (e: MouseEvent): void => {
+    if (e.target === this.inventory) this.onInventoryClose?.();
+  };
 
   constructor() {
     this.startButton.addEventListener('click', this.handleStart);
     this.resumeButton.addEventListener('click', this.handleResume);
+    this.inventory.addEventListener('click', this.handleInventoryClick);
   }
 
-  bind(handlers: { onStart: () => void; onResume: () => void }): void {
+  bind(handlers: { onStart: () => void; onResume: () => void; onInventoryClose: () => void }): void {
     this.onStart = handlers.onStart;
     this.onResume = handlers.onResume;
+    this.onInventoryClose = handlers.onInventoryClose;
+  }
+
+  get inventoryOpen(): boolean {
+    return !this.inventory.classList.contains('hidden');
+  }
+
+  showInventory(rows: Array<{ name: string; count: number; blurb: string }>): void {
+    this.inventoryList.replaceChildren(
+      ...rows.map((row) => {
+        const li = document.createElement('li');
+        for (const [cls, text] of [['item-name', row.name], ['item-count', String(row.count)], ['item-blurb', row.blurb]] as const) {
+          const span = document.createElement('span');
+          span.className = cls;
+          span.textContent = text;
+          li.appendChild(span);
+        }
+        return li;
+      }),
+    );
+    this.inventoryEmpty.classList.toggle('hidden', rows.length > 0);
+    const total = rows.reduce((n, r) => n + r.count, 0);
+    this.inventoryTotal.textContent = total > 0 ? `${total} ${total === 1 ? 'treasure' : 'treasures'} gathered` : '';
+    this.inventory.classList.remove('hidden');
+  }
+
+  hideInventory(): void {
+    this.inventory.classList.add('hidden');
+  }
+
+  /** A brief, quiet message near the bottom of the screen. */
+  toast(message: string): void {
+    window.clearTimeout(this.toastTimer);
+    window.clearTimeout(this.toastFade);
+    this.toastBox.textContent = message;
+    this.toastBox.classList.remove('hidden', 'leaving');
+    this.toastFade = window.setTimeout(() => this.toastBox.classList.add('leaving'), 2200);
+    this.toastTimer = window.setTimeout(() => this.toastBox.classList.add('hidden'), 2750);
   }
 
   get panelOpen(): boolean {
@@ -94,6 +144,9 @@ export class UI implements InteractionContext {
 
   dispose(): void {
     window.clearTimeout(this.titleTimer);
+    window.clearTimeout(this.toastTimer);
+    window.clearTimeout(this.toastFade);
+    this.inventory.removeEventListener('click', this.handleInventoryClick);
     this.startButton.removeEventListener('click', this.handleStart);
     this.resumeButton.removeEventListener('click', this.handleResume);
   }

@@ -7,18 +7,23 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
+import { AudioFeedback } from '../audio/AudioFeedback';
 import { InteractionSystem } from '../interaction/InteractionSystem';
+import { ITEM_INFO, Inventory } from '../inventory/Inventory';
 import { type InteractionContext } from '../interaction/Interactable';
 import { PlayerController } from '../player/PlayerController';
 import { UI } from '../ui/UI';
 import { LIGHTHOUSE, PLAYER, PLAYER_START } from '../world/layout';
+import { heightAt } from '../world/terrain';
+import { isInsideLighthouse } from '../world/Floors';
 import { createLighting, type Lighting } from '../world/Lighting';
 import { createSky, type Sky } from '../world/Sky';
 import { createWorld, type World } from '../world/World';
 import { Input } from './Input';
+import { type GameServices } from './services';
 import { clamp, smoothstep } from './math';
 
-type State = 'title' | 'intro' | 'playing' | 'paused';
+type State = 'title' | 'intro' | 'playing' | 'paused' | 'inventory';
 
 const INTRO_SECONDS = 3;
 const PANEL_CLOSE_DISTANCE = 4.5;
@@ -40,6 +45,7 @@ function lookPose(from: Vector3, to: Vector3): Pose {
   return { x: from.x, y: from.y, z: from.z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
 }
 
+const heightAtForDebug = (x: number, z: number) => heightAt(x, z);
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Owns the renderer, scene, game loop and the high-level state machine (title, intro, playing, paused). */
@@ -56,6 +62,9 @@ export class Game {
   private readonly sky: Sky;
   private readonly player: PlayerController;
   private readonly interaction = new InteractionSystem();
+  private readonly inventory = new Inventory();
+  private readonly audio = new AudioFeedback();
+  private indoor = 0;
 
   private state: State = 'title';
   private resumeState: State = 'playing';
@@ -92,18 +101,38 @@ export class Game {
     this.sky = createSky(3000);
     this.scene.add(this.sky.mesh);
 
-    this.world = createWorld();
+    const services: GameServices = {
+      inventory: this.inventory,
+      audio: this.audio,
+      notify: (message) => this.ui.toast(message),
+      unregister: (item) => this.interaction.unregister(item),
+    };
+    this.world = createWorld(services);
     this.scene.add(this.world.group);
 
-    this.player = new PlayerController(this.camera, canvas, this.input, this.world.collision);
+    this.player = new PlayerController(this.camera, canvas, this.input, this.world.collision, this.world.floors);
     this.player.onLockChange = (locked) => this.handleLockChange(locked);
     this.player.onLockError = () => this.handleLockError();
 
     for (const item of this.world.interactables) this.interaction.register(item);
+    this.interaction.setBlockers(this.world.blockers);
     this.interaction.onPromptChange = (text) => this.ui.setPrompt(text);
 
-    this.unsubscribers.push(this.input.onPress('KeyE', () => this.handleInteractKey()));
-    this.ui.bind({ onStart: () => this.begin(), onResume: () => this.player.lock() });
+    this.unsubscribers.push(
+      this.input.onPress('KeyE', () => this.handleInteractKey()),
+      this.input.onPress('Tab', () => this.toggleInventory()),
+      this.input.onPress('Escape', () => {
+        if (this.state === 'inventory') this.closeInventory();
+      }),
+    );
+    this.ui.bind({
+      onStart: () => this.begin(),
+      onResume: () => {
+        this.audio.unlock();
+        this.player.lock();
+      },
+      onInventoryClose: () => this.closeInventory(),
+    });
 
     const towards = lookPose(new Vector3(PLAYER_START.x, 0, PLAYER_START.z), new Vector3(LIGHTHOUSE.x, 0, LIGHTHOUSE.z));
     this.startPose = { ...towards, y: 0, pitch: 0.2 };
@@ -135,6 +164,7 @@ export class Game {
     this.ui.hideTitle();
     this.state = 'intro';
     this.introT = 0;
+    this.audio.unlock(); // browsers only allow audio after a gesture
     this.player.lock(); // must happen inside the click handler
   }
 
@@ -143,6 +173,8 @@ export class Game {
       this.ui.hidePause();
       if (this.state === 'paused') this.state = this.resumeState;
       this.player.inputEnabled = this.state === 'playing';
+    } else if (this.state === 'inventory') {
+      // The collection screen releases the pointer on purpose; closing it asks for the lock back.
     } else if (this.state === 'playing' || this.state === 'intro') {
       this.resumeState = this.state;
       this.state = 'paused';
@@ -160,6 +192,30 @@ export class Game {
       this.player.inputEnabled = false;
     }
     this.ui.showPause('The browser did not let LUMEN capture the mouse. Click Resume to try again.');
+  }
+
+  private toggleInventory(): void {
+    if (this.state === 'playing') {
+      this.state = 'inventory';
+      this.player.inputEnabled = false;
+      this.input.reset();
+      this.interaction.clearTarget();
+      this.ui.hidePanel();
+      this.ui.showInventory(this.inventory.entries().map(({ type, count }) => ({ name: ITEM_INFO[type].name, count, blurb: ITEM_INFO[type].blurb })));
+      this.audio.play('click');
+      if (document.pointerLockElement) document.exitPointerLock();
+    } else if (this.state === 'inventory') {
+      this.closeInventory();
+    }
+  }
+
+  private closeInventory(): void {
+    if (this.state !== 'inventory') return;
+    this.ui.hideInventory();
+    this.state = 'playing';
+    this.player.inputEnabled = true;
+    this.audio.play('click');
+    this.player.lock(); // if the browser refuses, the pause screen offers a Resume button
   }
 
   private handleInteractKey(): void {
@@ -214,10 +270,18 @@ export class Game {
         break;
     }
 
-    this.world.update(t);
+    this.world.update(t, Math.min(rawDt, 0.25), this.player.position);
+    this.updateIndoorLighting(Math.min(rawDt, 0.25));
     this.sky.update(t);
     this.sky.mesh.position.copy(this.camera.position);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Eases between outdoor and indoor light as the player steps through the door. */
+  private updateIndoorLighting(dt: number): void {
+    const inside = this.state !== 'title' && this.state !== 'intro' && isInsideLighthouse(this.player.position.x, this.player.position.z) ? 1 : 0;
+    this.indoor += (inside - this.indoor) * (1 - Math.exp(-dt * 3));
+    this.lighting.setIndoor(this.indoor);
   }
 
   private updateIntro(dt: number, t: number): void {
@@ -284,6 +348,15 @@ export class Game {
       },
       hudPrompt: () => document.getElementById('prompt-text')?.textContent ?? null,
       eyeHeight: PLAYER.eyeHeight,
+      /** Counts per item type, as shown in the collection screen. */
+      inventory: () => Object.fromEntries(this.inventory.entries().map((e) => [e.type, e.count])),
+      collectibles: () => this.world.collectibles.specs.map((s) => ({ ...s, y: heightAtForDebug(s.x, s.z), collected: this.inventory.isCollected(s.id) })),
+      toggleInventory: () => this.toggleInventory(),
+      inventoryOpen: () => this.ui.inventoryOpen,
+      targetId: () => this.interaction.target?.id ?? null,
+      indoorAmount: () => this.indoor,
+      pressInteract: () => this.handleInteractKey(),
+      doorState: () => this.world.doorState(),
     };
   }
 

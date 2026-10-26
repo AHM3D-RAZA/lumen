@@ -11,6 +11,8 @@ export class InteractionSystem {
   private readonly raycaster = new Raycaster();
   private readonly lookup = new Map<Object3D, Interactable>();
   private readonly meshes: Object3D[] = [];
+  private readonly owned = new Map<Interactable, Object3D[]>();
+  private blockers: Object3D[] = [];
   private current: Interactable | null = null;
   private currentPrompt: string | null = null;
   private maxRange = 0;
@@ -19,13 +21,34 @@ export class InteractionSystem {
   onPromptChange: ((prompt: string | null) => void) | null = null;
 
   register(item: Interactable): void {
+    const mine: Object3D[] = [];
     item.object.traverse((child) => {
       if ((child as Mesh).isMesh) {
         this.lookup.set(child, item);
         this.meshes.push(child);
+        mine.push(child);
       }
     });
+    this.owned.set(item, mine);
     this.maxRange = Math.max(this.maxRange, item.maxDistance);
+  }
+
+  /** Stops an interactable from being targeted (e.g. it was collected). */
+  unregister(item: Interactable): void {
+    const mine = this.owned.get(item);
+    if (!mine) return;
+    for (const m of mine) {
+      this.lookup.delete(m);
+      const i = this.meshes.indexOf(m);
+      if (i >= 0) this.meshes.splice(i, 1);
+    }
+    this.owned.delete(item);
+    if (this.current === item) this.clearTarget();
+  }
+
+  /** Solid meshes (walls, terrain, rocks) that hide interactables behind them. Only tested when something is targeted. */
+  setBlockers(blockers: Object3D[]): void {
+    this.blockers = blockers;
   }
 
   get target(): Interactable | null {
@@ -40,7 +63,7 @@ export class InteractionSystem {
       this.raycaster.far = this.maxRange;
       const hit = this.raycaster.intersectObjects(this.meshes, false)[0];
       const item = hit ? this.lookup.get(hit.object) : undefined;
-      if (hit && item && hit.distance <= item.maxDistance) found = item;
+      if (hit && item && hit.distance <= item.maxDistance && !this.isOccluded(hit.distance)) found = item;
     }
     const prompt = found ? (typeof found.prompt === 'function' ? found.prompt() : found.prompt) : null;
     this.current = found;
@@ -48,6 +71,16 @@ export class InteractionSystem {
       this.currentPrompt = prompt;
       this.onPromptChange?.(prompt);
     }
+  }
+
+  /** True if a solid surface lies between the camera and a hit `distance` along the current ray. */
+  private isOccluded(distance: number): boolean {
+    if (this.blockers.length === 0) return false;
+    const far = this.raycaster.far;
+    this.raycaster.far = Math.max(0, distance - 0.03);
+    const blocked = this.raycaster.intersectObjects(this.blockers, false).length > 0;
+    this.raycaster.far = far;
+    return blocked;
   }
 
   /** Triggers the currently targeted interactable. Returns true if something was triggered. */

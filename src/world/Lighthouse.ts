@@ -29,8 +29,15 @@ import {
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { type CollisionWorld } from '../core/collision';
+import { type GameServices } from '../core/services';
 import { noise2 } from '../core/math';
+import { type Interactable } from '../interaction/Interactable';
+import { createDoor } from './Door';
+import { addLighthouseColliders } from './interior/colliders';
+import { createInterior } from './interior/Interior';
+import { DOOR_ANGLE, DOOR_OPENING, GROUND_WINDOWS, R_FOUNDATION_TOP, R_IN, R_UP, UPPER_WINDOW, foundationRadius } from './interior/layout';
 import { LIGHTHOUSE } from './layout';
+import { buildReveals, buildWallSurface } from './wallGeometry';
 import { createGlowTexture, createPlasterTexture, createStoneTexture, createWoodTexture } from './textures';
 
 /** Dimensions in metres, measured upwards from the levelled pad. */
@@ -38,11 +45,9 @@ const BASE_TOP = 3.7;
 const TOWER_TOP = 19.6;
 const R_BOTTOM = 3.55;
 const R_TOP = 2.3;
-const FOUNDATION_RADIUS = 5.0;
-const DOOR_RADIUS = 5.0;
 const AMBER = new Color('#ffb45a');
 
-export const DOOR_ANGLE = Math.atan2(LIGHTHOUSE.doorDir.x, LIGHTHOUSE.doorDir.z);
+export { DOOR_ANGLE };
 
 const towerRadius = (y: number): number => {
   const u = Math.min(1, Math.max(0, (y - BASE_TOP) / (TOWER_TOP - BASE_TOP)));
@@ -110,24 +115,29 @@ function addGrime(g: BufferGeometry, y0: number): void {
 
 export interface LighthouseBuild {
   group: Group;
-  addColliders(collision: CollisionWorld): void;
-  update(time: number): void;
+  interactables: Interactable[];
+  doorState(): { target: number; settled: boolean };
+  /** Solid surfaces that must hide what is behind them from the interaction ray. */
+  blockers: Mesh[];
+  update(time: number, dt: number, player: { x: number; z: number }): void;
 }
 
-export function createLighthouse(): LighthouseBuild {
+export function createLighthouse(collision: CollisionWorld, services: GameServices): LighthouseBuild {
   const group = new Group();
   group.position.set(LIGHTHOUSE.x, LIGHTHOUSE.padHeight, LIGHTHOUSE.z);
+  const blockers: Mesh[] = [];
 
   // ---- Materials ---------------------------------------------------------------------------
   const stoneTex = createStoneTexture();
   const plasterTex = createPlasterTexture();
   const woodTex = createWoodTexture('#6a5b4a');
 
-  const foundationMat = new MeshStandardMaterial({ map: cloneTexture(stoneTex, 9, 1.4), bumpMap: cloneTexture(stoneTex, 9, 1.4), bumpScale: 2.2, roughness: 0.95 });
+  const foundationMat = new MeshStandardMaterial({ map: cloneTexture(stoneTex, 1, 1), bumpMap: cloneTexture(stoneTex, 1, 1), bumpScale: 2.2, roughness: 0.95 });
+  const corniceMat = new MeshStandardMaterial({ map: cloneTexture(stoneTex, 9, 0.6), roughness: 0.95 });
   const trimMat = new MeshStandardMaterial({ map: cloneTexture(stoneTex, 0.45, 0.45), bumpMap: cloneTexture(stoneTex, 0.45, 0.45), bumpScale: 1.5, roughness: 0.92, color: '#c9ced0' });
   const corbelMat = new MeshStandardMaterial({ map: cloneTexture(stoneTex, 6, 0.6), roughness: 0.92, color: '#b9bfc2' });
-  const whiteMat = new MeshStandardMaterial({ map: cloneTexture(plasterTex, 3, 3), vertexColors: true, color: '#e8e7de', roughness: 0.86 });
-  const redMat = new MeshStandardMaterial({ map: cloneTexture(plasterTex, 3, 2), vertexColors: true, color: '#a4413a', roughness: 0.82 });
+  const whiteMat = new MeshStandardMaterial({ map: cloneTexture(plasterTex, 1, 1), vertexColors: true, color: '#e8e7de', roughness: 0.86 });
+  const redMat = new MeshStandardMaterial({ map: cloneTexture(plasterTex, 1, 1), vertexColors: true, color: '#a4413a', roughness: 0.82 });
   const ironMat = new MeshStandardMaterial({ color: '#23292c', metalness: 0.65, roughness: 0.5 });
   const copperMat = new MeshStandardMaterial({ color: '#4f9283', metalness: 0.55, roughness: 0.5 });
   const woodMat = new MeshStandardMaterial({ map: woodTex, roughness: 0.88 });
@@ -135,54 +145,46 @@ export function createLighthouse(): LighthouseBuild {
   const paneMat = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   const lampMat = new MeshBasicMaterial({ color: '#ffdd9a', toneMapped: false });
 
-  // ---- Foundation: a drum of coursed stone with a projecting cornice ------------------------
-  const foundation = new Mesh(
-    lathe([[FOUNDATION_RADIUS, -1.6], [FOUNDATION_RADIUS, 0], [4.76, BASE_TOP - 0.7], [5.08, BASE_TOP - 0.6], [5.08, BASE_TOP - 0.1], [R_BOTTOM, BASE_TOP]], 64),
-    foundationMat,
-  );
-  foundation.castShadow = foundation.receiveShadow = true;
-  group.add(foundation);
+  const solid = (mesh: Mesh): Mesh => {
+    mesh.castShadow = mesh.receiveShadow = true;
+    group.add(mesh);
+    blockers.push(mesh);
+    return mesh;
+  };
 
-  // ---- Tower: tapered, banded plaster ----------------------------------------------------------
+  // ---- Foundation: a drum of coursed stone with real openings for the door and windows ----------
+  const openings = [DOOR_OPENING, ...GROUND_WINDOWS];
+  solid(new Mesh(buildWallSurface({ radius: foundationRadius, yA: -1.6, yB: 3.0, openings, inward: false, uvTile: 3.2 }), foundationMat));
+  solid(new Mesh(buildReveals(openings, R_IN, foundationRadius), trimMat));
+  solid(new Mesh(lathe([[R_FOUNDATION_TOP, 2.98], [5.08, 3.1], [5.08, 3.6], [R_BOTTOM, BASE_TOP]], 64), corniceMat));
+
+  // ---- Tower: tapered, banded plaster (the lowest band has the upper-room window) -------------------
   const bandEdges = [BASE_TOP, 8.9, 12.9, 16.2, TOWER_TOP];
   const whiteParts: BufferGeometry[] = [];
   const redParts: BufferGeometry[] = [];
+  const grime = (x: number, y: number, z: number) => 1 - 0.28 * (1 - Math.min(1, (y - BASE_TOP) / 7)) - 0.1 * noise2(Math.atan2(x, z) * 2.5, y * 0.35);
   for (let b = 0; b < bandEdges.length - 1; b++) {
-    const y0 = bandEdges[b]!;
-    const y1 = bandEdges[b + 1]!;
-    const steps = Math.max(3, Math.round((y1 - y0) / 1.2));
-    const pts: Array<[number, number]> = [];
-    for (let s = 0; s <= steps; s++) {
-      const y = y0 + ((y1 - y0) * s) / steps;
-      pts.push([towerRadius(y), y]);
-    }
-    const g = lathe(pts, 56);
-    addGrime(g, BASE_TOP);
+    const g = buildWallSurface({ radius: towerRadius, yA: bandEdges[b]!, yB: bandEdges[b + 1]!, openings: b === 0 ? [UPPER_WINDOW] : [], inward: false, uvTile: 3.5, shade: grime });
     (b % 2 === 0 ? whiteParts : redParts).push(g);
   }
-  for (const [parts, mat] of [[whiteParts, whiteMat], [redParts, redMat]] as const) {
-    const mesh = new Mesh(mergeAll(parts), mat);
-    mesh.castShadow = mesh.receiveShadow = true;
-    group.add(mesh);
-  }
+  for (const [parts, mat] of [[whiteParts, whiteMat], [redParts, redMat]] as const) solid(new Mesh(mergeAll(parts), mat));
+  solid(new Mesh(buildReveals([UPPER_WINDOW], R_UP, towerRadius), trimMat));
   // Thin stone string courses where the paint changes.
   const ringParts = [8.9, 12.9, 16.2].map((y) => {
     const g = new TorusGeometry(towerRadius(y) + 0.02, 0.07, 6, 56);
     g.rotateX(Math.PI / 2);
     return transformed(g, 0, y, 0);
   });
-  const rings = new Mesh(mergeAll(ringParts), trimMat);
-  rings.castShadow = true;
-  group.add(rings);
+  group.add(new Mesh(mergeAll(ringParts), trimMat));
 
   // ---- Gallery: corbelled deck, railing --------------------------------------------------------
   const deckY = TOWER_TOP + 0.2;
-  const corbel = new Mesh(
-    lathe([[towerRadius(TOWER_TOP - 1.1), TOWER_TOP - 1.1], [2.9, TOWER_TOP - 0.95], [3.45, TOWER_TOP - 0.55], [3.95, TOWER_TOP - 0.15], [3.95, deckY], [2.0, deckY]], 56),
-    corbelMat,
+  solid(
+    new Mesh(
+      lathe([[towerRadius(TOWER_TOP - 1.1), TOWER_TOP - 1.1], [2.9, TOWER_TOP - 0.95], [3.45, TOWER_TOP - 0.55], [3.95, TOWER_TOP - 0.15], [3.95, deckY], [2.0, deckY]], 56),
+      corbelMat,
+    ),
   );
-  corbel.castShadow = corbel.receiveShadow = true;
-  group.add(corbel);
 
   const postCount = 32;
   const posts = new InstancedMesh(new CylinderGeometry(0.03, 0.03, 1.05, 6), ironMat, postCount);
@@ -264,9 +266,8 @@ export function createLighthouse(): LighthouseBuild {
   rod.position.y = roofY + 3.4;
   group.add(finial, rod);
 
-  // ---- Windows: stone surrounds with glowing amber panes, spiralling up the tower ---------------
+  // ---- Decorative windows (amber glow) spiralling up the upper tower --------------------------------
   const windowSpecs: Array<[number, number]> = [
-    [6.7, 0.0],
     [9.9, 0.95],
     [13.0, -0.9],
     [15.3, 1.8],
@@ -305,39 +306,30 @@ export function createLighthouse(): LighthouseBuild {
   frames.castShadow = true;
   group.add(frames, panes, bars);
 
-  // ---- Entrance: stone surround, planked door, iron fittings, step, wall lantern ---------------
-  const door = new Group();
-  door.rotation.y = DOOR_ANGLE;
-  group.add(door);
+  // ---- Entrance: working door, doorstep and wall lantern ---------------------------------------------
+  const door = createDoor(collision, services, woodMat, trimMat, ironMat);
+  group.add(door.group);
 
-  const doorFrame = new Mesh(archFrame(2.3, 3.3, -0.3, 1.5, 2.65, 0, 0.95).translate(0, 0, DOOR_RADIUS - 0.8), trimMat);
-  const leaf = new Mesh(
-    new ExtrudeGeometry(archPath(new Shape(), 1.5, 2.65, 0), { depth: 0.14, bevelEnabled: false, curveSegments: 12 }).translate(0, 0, DOOR_RADIUS - 0.28),
-    woodMat,
-  );
-  doorFrame.castShadow = true;
-  door.add(doorFrame, leaf);
-
-  const fittings: BufferGeometry[] = [];
-  for (const y of [0.55, 1.35, 2.1]) fittings.push(new BoxGeometry(1.42, 0.09, 0.04).translate(0, y, DOOR_RADIUS - 0.12));
-  const ring = new TorusGeometry(0.075, 0.016, 6, 16).translate(0.42, 1.15, DOOR_RADIUS - 0.08);
-  fittings.push(ring, new BoxGeometry(0.06, 0.14, 0.05).translate(0.42, 1.28, DOOR_RADIUS - 0.1));
-  door.add(new Mesh(mergeAll(fittings), ironMat));
-
+  const entrance = new Group();
+  entrance.rotation.y = DOOR_ANGLE;
+  group.add(entrance);
   const step = new Mesh(new BoxGeometry(2.9, 0.18, 1.25), trimMat);
-  step.position.set(0, 0.09, DOOR_RADIUS + 0.55);
+  step.position.set(0, 0.09, 5.55);
   step.castShadow = step.receiveShadow = true;
-  door.add(step);
-
   const lantern = new Mesh(new BoxGeometry(0.2, 0.3, 0.2), lampMat);
-  lantern.position.set(1.55, 2.55, DOOR_RADIUS + 0.02);
+  lantern.position.set(1.62, 2.55, 4.72);
   const bracket = new Mesh(new BoxGeometry(0.05, 0.05, 0.28), ironMat);
-  bracket.position.set(1.55, 2.74, DOOR_RADIUS - 0.08);
-  door.add(lantern, bracket);
-  const doorGlowLocal = new Vector2(1.55, DOOR_RADIUS + 0.25);
-  halo.push(Math.sin(DOOR_ANGLE) * doorGlowLocal.y + Math.cos(DOOR_ANGLE) * doorGlowLocal.x, 2.55, Math.cos(DOOR_ANGLE) * doorGlowLocal.y - Math.sin(DOOR_ANGLE) * doorGlowLocal.x);
+  bracket.position.set(1.62, 2.74, 4.62);
+  entrance.add(step, lantern, bracket);
+  halo.push(Math.sin(DOOR_ANGLE) * 4.97 + Math.cos(DOOR_ANGLE) * 1.62, 2.55, Math.cos(DOOR_ANGLE) * 4.97 - Math.sin(DOOR_ANGLE) * 1.62);
 
-  // ---- Glow: additive halos instead of post-processing bloom -----------------------------------
+  // ---- Interior ------------------------------------------------------------------------------------------
+  const interior = createInterior(services, towerRadius);
+  group.add(interior.group);
+  blockers.push(...interior.blockers);
+  addLighthouseColliders(collision);
+
+  // ---- Glow: additive halos instead of post-processing bloom -----------------------------------------
   const glowTex = createGlowTexture();
   const makeHalo = (positions: number[], size: number, opacity: number) => {
     const g = new BufferGeometry();
@@ -359,15 +351,14 @@ export function createLighthouse(): LighthouseBuild {
 
   return {
     group,
-    addColliders(collision) {
-      collision.addCircle(LIGHTHOUSE.x, LIGHTHOUSE.z, FOUNDATION_RADIUS);
-      const sx = Math.sin(DOOR_ANGLE);
-      const sz = Math.cos(DOOR_ANGLE);
-      collision.addBox(LIGHTHOUSE.x + sx * (DOOR_RADIUS + 0.55), LIGHTHOUSE.z + sz * (DOOR_RADIUS + 0.55), 1.45, 0.62, DOOR_ANGLE);
-    },
-    update(time) {
+    interactables: [door.interactable, ...interior.interactables],
+    doorState: () => door.state(),
+    blockers,
+    update(time, dt, player) {
       (lampHalo.material as PointsMaterial).opacity = 0.58 + 0.04 * Math.sin(time * 1.3) + 0.02 * Math.sin(time * 3.1);
       lampLight.intensity = 70 + 3 * Math.sin(time * 1.3);
+      door.update(dt, player);
+      interior.update(time);
     },
   };
 }

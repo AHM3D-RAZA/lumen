@@ -141,7 +141,15 @@ function createShrubTemplate(rng: Rng): BufferGeometry {
   return g;
 }
 
-export function createVegetation(rng: Rng, collision: CollisionWorld): Vegetation {
+export interface Clearing {
+  x: number;
+  z: number;
+  r: number;
+}
+
+/** `clearings` keep grass and shrubs away from things the player should be able to see, like collectibles. */
+export function createVegetation(rng: Rng, collision: CollisionWorld, clearings: readonly Clearing[] = []): Vegetation {
+  const cleared = (x: number, z: number) => clearings.some((c) => Math.hypot(x - c.x, z - c.z) < c.r);
   const group = new Group();
   const tuft = createTuftGeometry();
   const grassMat = createGrassMaterial();
@@ -158,7 +166,8 @@ export function createVegetation(rng: Rng, collision: CollisionWorld): Vegetatio
     (x, z, h) => {
       if (h < 1.05 || nearLighthouse(x, z, 9.6) || distanceToPath(x, z) < 1.9 || slopeAt(x, z) > 0.6) return false;
       const mask = smoothstep(0.3, 0.52, fbm2(x * 0.07 + 30, z * 0.07 + 5, 3));
-      return rng() < 0.12 + 0.88 * mask;
+      const keep = rng() < 0.12 + 0.88 * mask;
+      return keep && !cleared(x, z);
     },
     (x, z, r, color) => {
       const t = fbm2(x * 0.11, z * 0.11, 2);
@@ -177,7 +186,8 @@ export function createVegetation(rng: Rng, collision: CollisionWorld): Vegetatio
     (x, z, h) => {
       const d = coastDistance(x, z);
       if (h < 0.65 || h > 2.0 || d < 0.8 || distanceToPath(x, z) < 2.2) return false;
-      return rng() < smoothstep(0.35, 0.6, fbm2(x * 0.09 - 9, z * 0.09 + 21, 3));
+      const keep = rng() < smoothstep(0.35, 0.6, fbm2(x * 0.09 - 9, z * 0.09 + 21, 3));
+      return keep && !cleared(x, z);
     },
     (_x, _z, r, color) => {
       color.setRGB(1.18, 1.1, 0.74);
@@ -200,7 +210,7 @@ export function createVegetation(rng: Rng, collision: CollisionWorld): Vegetatio
     const d = coastDistance(x, z);
     const coastal = placed >= 22;
     if (d > (coastal ? 0.97 : 0.9) || (coastal && d < 0.8)) continue;
-    if (h < 1.0 || h > 7.2 || slopeAt(x, z) > 0.5 || distanceToPath(x, z) < 2.6 || nearLighthouse(x, z, 11)) continue;
+    if (h < 1.0 || h > 7.2 || slopeAt(x, z) > 0.5 || distanceToPath(x, z) < 2.6 || nearLighthouse(x, z, 11) || cleared(x, z)) continue;
     const size = coastal ? 0.45 + rng() * 0.3 : 0.8 + rng() * 0.8;
     const blobs = 3 + Math.floor(rng() * 3);
     for (let b = 0; b < blobs; b++) {
