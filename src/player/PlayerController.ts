@@ -71,8 +71,9 @@ export class PlayerController {
     }
   }
 
-  setPose(x: number, z: number, yaw: number, pitch: number): void {
-    this.position.set(x, this.floors.groundAt(x, z, heightAt(x, z)), z);
+  /** `fromY` is the height the player is coming from; it decides which floor (e.g. upstairs) they land on. */
+  setPose(x: number, z: number, yaw: number, pitch: number, fromY = heightAt(x, z)): void {
+    this.position.set(x, this.floors.groundAt(x, z, fromY), z);
     this.yaw = yaw;
     this.pitch = pitch;
     this.eyeY = this.position.y + PLAYER.eyeHeight;

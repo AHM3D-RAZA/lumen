@@ -28,9 +28,11 @@ export const LAYOUT = {
   chart: at(4.12, -88),
   lantern: { x: 0, y: 2.95, z: 2.3 },
   // Upper room
-  telescope: at(2.45, -42),
-  crate: at(2.55, 128),
-  table: at(2.45, 42),
+  // Upper-room pieces stand against the wall so a clear walkway (about 0.3 m for the player's centre) is left
+  // between them and the stairwell railing.
+  telescope: at(2.72, -42),
+  crate: at(2.72, 128),
+  table: at(2.72, 42),
   hatch: at(2.5, 180),
   upperLantern: { x: 0, y: UPPER_Y + 3.0, z: 0 },
 } as const;
@@ -54,7 +56,7 @@ export const FOOTPRINTS: Footprint[] = [
   { placement: LAYOUT.stove, hx: 0.42, hz: 0.42, circle: true, level: 'ground' },
   { placement: LAYOUT.chest, hx: 0.55, hz: 0.28, level: 'ground' },
   { placement: LAYOUT.sideboard, hx: 0.5, hz: 0.23, level: 'ground' },
-  { placement: LAYOUT.telescope, hx: 0.32, hz: 0.32, circle: true, level: 'upper' },
-  { placement: LAYOUT.crate, hx: 0.38, hz: 0.3, level: 'upper' },
-  { placement: LAYOUT.table, hx: 0.38, hz: 0.38, circle: true, level: 'upper' },
+  { placement: LAYOUT.telescope, hx: 0.25, hz: 0.25, circle: true, level: 'upper' },
+  { placement: LAYOUT.crate, hx: 0.37, hz: 0.28, level: 'upper' },
+  { placement: LAYOUT.table, hx: 0.3, hz: 0.3, circle: true, level: 'upper' },
 ];

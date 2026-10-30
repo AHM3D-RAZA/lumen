@@ -227,3 +227,159 @@ import { planCollectibles } from '../src/world/collectiblePlan';
   check(new Set(specs.map((s) => s.id)).size === specs.length, 'collectible ids are unique');
   check(['driftwood', 'sea_glass', 'shell', 'lens_shard'].every((t) => (counts[t] ?? 0) > 0), 'all four collectible types are present');
 }
+
+// ---------------------------------------------------------------------------------------------
+// Stair navigation regressions (the upper floor used to be split into pockets by furniture, and the opening
+// onto the stair was too narrow for the player, so coming down could get stuck)
+
+import { STAIRWELL_GAP } from '../src/world/interior/colliders';
+import { PLAYER } from '../src/world/layout';
+
+{
+  const TAU = Math.PI * 2;
+  const wrap = (a: number) => ((a % TAU) + TAU) % TAU;
+  const col = makeWorld(false);
+  const FLOOR_WORLD = PAD + FLOOR_Y;
+  const UPPER_WORLD = PAD + UPPER_Y;
+
+  // 1. Flood fill each floor: every spot the player can stand must be connected to the stair.
+  const CELL = 0.08;
+  const standable = (lx: number, lz: number, y: number, onUpper: boolean): boolean => {
+    const r = Math.hypot(lx, lz);
+    if (r > (onUpper ? 3.0 : 4.1)) return false;
+    const w = localToWorld(lx, lz);
+    const p = { x: w.x, z: w.z };
+    col.resolve(p, PLAYER.radius, y);
+    if (Math.hypot(p.x - w.x, p.z - w.z) > 1e-4) return false;
+    const g = floors.groundAt(w.x, w.z, y);
+    return onUpper ? g >= UPPER_WORLD - 0.3 : Math.abs(g - FLOOR_WORLD) < 0.02;
+  };
+  const flood = (startLx: number, startLz: number, y: number, onUpper: boolean) => {
+    const half = onUpper ? 3.1 : 4.3;
+    const n = Math.round((2 * half) / CELL);
+    const ok = new Uint8Array(n * n);
+    let total = 0;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (standable(-half + i * CELL, -half + j * CELL, y, onUpper)) { ok[j * n + i] = 1; total++; }
+    const si = Math.round((startLx + half) / CELL), sj = Math.round((startLz + half) / CELL);
+    const seen = new Uint8Array(n * n);
+    const q = [sj * n + si];
+    seen[q[0]!] = 1;
+    let reached = 0;
+    for (let h = 0; h < q.length; h++) {
+      const c = q[h]!;
+      reached++;
+      const i = c % n, j = (c - i) / n;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const ni = i + di, nj = j + dj;
+        if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+        const k = nj * n + ni;
+        if (ok[k] && !seen[k]) { seen[k] = 1; q.push(k); }
+      }
+    }
+    return { total, reached, startOk: ok[sj * n + si] === 1 };
+  };
+  const top = polar(0.95, STAIR_END_ALPHA - 0.3);
+  const up = flood(top.x, top.z, UPPER_WORLD, true);
+  check(up.startOk && up.reached / up.total > 0.995, 'upper floor: every standable spot connects to the top of the stair (furniture does not split the room)', `(${up.reached} of ${up.total} cells)`);
+  const door = flood(0, 3.4, FLOOR_WORLD, false);
+  check(door.startOk && door.reached / door.total > 0.995, 'ground floor: every standable spot connects to the doorway (furniture does not split the room)', `(${door.reached} of ${door.total} cells)`);
+
+  // 2. The opening in the stairwell railing must be wide enough for the player to walk through.
+  const ringR = STAIR.well + 0.04;
+  check(STAIRWELL_GAP.before * ringR >= 2 * (PLAYER.radius + 0.06), 'the stairwell opening is wide enough for the player to pass between the railing posts', `(${(STAIRWELL_GAP.before * ringR).toFixed(2)} m of arc)`);
+
+  // 3. Steered ascents and descents from random start points, with wobble; the player slides along the rail when blocked.
+  const run = (dir: 1 | -1, r0: number, seed: number, wobble: number): boolean => {
+    const rng = mulberry32(seed);
+    const startA = dir === 1 ? STAIR.startAlpha - 2.5 + rng() * 5 : STAIR_END_ALPHA + 0.3 + rng() * 5.4;
+    const sp = dir === 1 ? polar(2.2 + rng() * 1.2, startA) : polar(1.9 + rng() * 0.7, startA);
+    const b = spawn(sp.x, sp.z, dir === 1 ? PAD : UPPER_WORLD);
+    if (dir === -1) b.y = UPPER_WORLD;
+    const speed = PLAYER.walkSpeed / 60;
+    let head = 0, blocked = 0, slideFor = 0, slideSign = 1;
+    for (let step = 0; step < 60 * 45; step++) {
+      const l = worldToLocal(b.x, b.z);
+      const r = Math.hypot(l.lx, l.lz), a = Math.atan2(l.lx, l.lz);
+      let tr = r0, ta = a + dir * 0.5;
+      if (dir === 1 && b.y < PAD + FLOOR_Y + 0.3 && r >= 1.3) ta = STAIR.startAlpha + 0.1;
+      if (dir === -1 && b.y > UPPER_WORLD - 0.1 && r > 1.4) ta = STAIR_END_ALPHA - 0.25;
+      let t = polar(tr, ta);
+      if (slideFor > 0) { slideFor--; t = polar(Math.max(r, 1.7), a + slideSign * 0.4); }
+      const dx = t.x - l.lx, dz = t.z - l.lz, d = Math.hypot(dx, dz) || 1;
+      head = (head + (rng() - 0.5) * wobble) * 0.9;
+      const cs = Math.cos(head), sn = Math.sin(head);
+      const w = localToWorld(l.lx + ((dx / d) * cs - (dz / d) * sn) * speed, l.lz + ((dx / d) * sn + (dz / d) * cs) * speed);
+      const px = b.x, pz = b.z;
+      moveBody(b, w.x - b.x, w.z - b.z, col, floors);
+      blocked = Math.hypot(b.x - px, b.z - pz) < speed * 0.3 ? blocked + 1 : 0;
+      if (blocked > 6 && slideFor === 0 && dir === -1) {
+        slideFor = 40;
+        blocked = 0;
+        let da = wrap(a - (STAIR_END_ALPHA - 0.6));
+        if (da > Math.PI) da -= TAU;
+        slideSign = da > 0 ? -1 : 1;
+      }
+      if (dir === 1 && b.y >= UPPER_WORLD - 0.02) return true;
+      if (dir === -1 && b.y <= FLOOR_WORLD + 0.02) return true;
+    }
+    return false;
+  };
+  for (const dir of [1, -1] as const) {
+    let ok = 0, total = 0;
+    for (const r0 of [0.7, 0.85, 1.0, 1.1]) for (let seed = 1; seed <= 10; seed++) for (const wob of [0, 0.5]) { total++; if (run(dir, r0, seed * 7 + (wob > 0 ? 3 : 0), wob)) ok++; }
+    check(ok === total, dir === 1 ? 'steered ascents from random start points all reach the upper floor' : 'steered descents from random points on the upper floor all reach the ground floor', `(${ok}/${total})`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// No sudden drops: walking past the end of the stair, or anywhere else, never moves the player down by more
+// than a step (past the top tread there is a void inside the stair; the player used to fall through it to a lower floor)
+
+{
+  const TAU = Math.PI * 2;
+  const col = makeWorld(false);
+  const UPPER_WORLD = PAD + UPPER_Y;
+
+  // 1. Climb the spiral and keep walking along it past the last step, at several steering radii.
+  let worst = 0;
+  let reachedTop = 0;
+  const radii = [0.5, 0.7, 0.9, 1.1];
+  for (const r0 of radii) {
+    const s = polar(2.2, STAIR.startAlpha - 0.8);
+    const b = spawn(s.x, s.z);
+    for (let t = 0; t < 60 * 40; t++) {
+      const l = worldToLocal(b.x, b.z);
+      const r = Math.hypot(l.lx, l.lz), a = Math.atan2(l.lx, l.lz);
+      let ta = a + 0.5;
+      if (b.y < PAD + 0.5 && r >= 1.3) ta = STAIR.startAlpha + 0.1;
+      const tg = polar(r0, ta);
+      const dx = tg.x - l.lx, dz = tg.z - l.lz, d = Math.hypot(dx, dz) || 1;
+      const w = localToWorld(l.lx + (dx / d) * 0.06, l.lz + (dz / d) * 0.06);
+      const y0 = b.y;
+      moveBody(b, w.x - b.x, w.z - b.z, col, floors);
+      worst = Math.max(worst, y0 - b.y);
+    }
+    if (b.y >= UPPER_WORLD - 0.02) reachedTop++;
+  }
+  check(worst < 0.4 && reachedTop === radii.length, 'walking on past the top of the stair never drops the player (they stop at the end of the tread)', `(worst single-step drop ${worst.toFixed(2)} m, reached the top in ${reachedTop}/${radii.length} runs)`);
+
+  // 2. Random walks over the ground floor, the stair and the upper floor: no step may change the height by more than a stair step.
+  const rng = mulberry32(2024);
+  let worstDy = 0;
+  for (let k = 0; k < 90; k++) {
+    const level = k % 3;
+    const a0 = rng() * TAU;
+    const p = level === 0 ? polar(1.6 + rng() * 2.3, a0) : level === 1 ? polar(0.4 + rng() * 0.8, a0) : polar(1.9 + rng() * 0.7, a0);
+    const w = localToWorld(p.x, p.z);
+    const b: Body = { x: w.x, y: level === 0 ? PAD + FLOOR_Y : UPPER_WORLD, z: w.z };
+    b.y = floors.groundAt(w.x, w.z, b.y);
+    let heading = rng() * TAU;
+    for (let t = 0; t < 4000; t++) {
+      heading += (rng() - 0.5) * 0.35;
+      const y0 = b.y;
+      moveBody(b, Math.cos(heading) * 0.06, Math.sin(heading) * 0.06, col, floors);
+      worstDy = Math.max(worstDy, Math.abs(b.y - y0));
+    }
+  }
+  check(worstDy < 0.4, 'random walks over the ground floor, stair and upper floor never change height by more than a stair step', `(largest single-step change ${worstDy.toFixed(2)} m)`);
+}

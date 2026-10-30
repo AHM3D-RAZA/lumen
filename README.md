@@ -17,7 +17,7 @@ npm run dev          # development server (http://localhost:5173)
 npm run build        # type-check + production build into dist/
 npm run preview      # serve the production build locally
 npm run typecheck    # TypeScript only
-npm run check:world  # headless checks: island walkability, doorway, walls, stair, railing, collectible placement
+npm run check:world  # headless checks: island walkability, doorway, walls, stair up and down (steered), floor connectivity, collectible placement
 ```
 
 A browser with WebGL 2 and hardware acceleration is needed. If the game cannot start, a message explains why.

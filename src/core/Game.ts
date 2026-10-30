@@ -325,7 +325,7 @@ export class Game {
     return {
       state: () => this.state,
       position: () => this.player.position.toArray(),
-      teleport: (x: number, z: number, yaw: number, pitch = 0) => this.player.setPose(x, z, yaw, pitch),
+      teleport: (x: number, z: number, yaw: number, pitch = 0, fromY?: number) => this.player.setPose(x, z, yaw, pitch, fromY),
       forceStart: () => {
         this.ui.hideTitle();
         this.state = 'playing';

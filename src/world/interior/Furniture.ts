@@ -319,10 +319,10 @@ export function createFurniture(m: InteriorMaterials, glow: Texture): FurnitureP
     group.add(shadowed(scope));
 
     const table = new Group();
-    table.add(cyl(0.38, 0.38, 0.04, m.wood, 0, 0.72, 0, 20), cyl(0.04, 0.04, 0.7, m.woodDark, 0, 0.35, 0, 8), cyl(0.2, 0.24, 0.04, m.woodDark, 0, 0.02, 0, 12));
+    table.add(cyl(0.3, 0.3, 0.04, m.wood, 0, 0.72, 0, 20), cyl(0.04, 0.04, 0.7, m.woodDark, 0, 0.35, 0, 8), cyl(0.16, 0.19, 0.04, m.woodDark, 0, 0.02, 0, 12));
     const lamp = oilLamp(m, glow);
     lamp.group.position.set(0.05, 0.74, 0);
-    table.add(lamp.group, cyl(0.03, 0.025, 0.06, m.ceramic, -0.2, 0.77, 0.1, 10));
+    table.add(lamp.group, cyl(0.03, 0.025, 0.06, m.ceramic, -0.16, 0.77, 0.08, 10));
     group.add(placed(shadowed(table), LAYOUT.table, UPPER_Y));
 
     const crate = new Group();
